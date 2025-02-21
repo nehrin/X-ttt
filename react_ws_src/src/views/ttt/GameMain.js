@@ -11,6 +11,7 @@ export default class SetName extends Component {
 
 	constructor (props) {
 		super(props)
+        if (this.props.game_type != 'live') this.turn_opp_live = this.turn_opp_live.bind(this);
 
 		this.win_sets = [
 			['c1', 'c2', 'c3', 'c4'],
@@ -27,16 +28,16 @@ export default class SetName extends Component {
             ['c4', 'c7', 'c10', 'c13']
 		]
 
-
+        this.sock_start();
 		if (this.props.game_type != 'live')
-			this.state = {
+			
+            this.state = {
 				cell_vals: {},
 				next_turn_ply: true,
 				game_play: true,
 				game_stat: 'Start game'
 			}
 		else {
-			this.sock_start()
 
 			this.state = {
 				cell_vals: {},
@@ -50,7 +51,7 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 
 	componentDidMount () {
-    	TweenMax.from('#game_stat', 1, {display: 'none', opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeIn})
+        TweenMax.from('#game_stat', 1, {display: 'none', opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeIn})
     	TweenMax.from('#game_board', 1, {display: 'none', opacity: 0, x:-200, y:-200, scaleX:0, scaleY:0, ease: Power4.easeIn})
 	}
 
@@ -62,28 +63,39 @@ export default class SetName extends Component {
 		this.socket = io(app.settings.ws_conf.loc.SOCKET__io.u);
 
 		this.socket.on('connect', function(data) { 
-			// console.log('socket connected', data)
+			console.log('socket connected', data)
 
-			this.socket.emit('new player', { name: app.settings.curr_user.name });
+			this.socket.emit('joinPlayer', app.settings.curr_user.name); // Emit joinPlayer event with player name
+
+			// Add new event handler for player joins
+			this.socket.on('player_joined', function(data) {
+				console.log('Player joined:', data);
+				this.setState({
+					game_stat: 'Player ' + data.name + ' joined. Waiting for opponent...'
+				});
+			}.bind(this));
+
+			this.socket.on('pair_players', function(data) { 
+				console.log('Received pair_players event:', data);
+
+				this.setState({
+					next_turn_ply: data.mode=='m',
+					game_play: true,
+					game_stat: 'Playing with ' + data.opp.name,
+					player_symbol: data.symbol // Store the player's symbol
+				})
+
+			}.bind(this));
+
+			this.socket.on('opp_turn', this.turn_opp_live); // <-- Setting up the listener for 'opp_turn'
+
+			this.socket.on('turn_update', function(data) {
+				this.setState({
+					next_turn_ply: data.your_turn
+				});
+			}.bind(this));
 
 		}.bind(this));
-
-		this.socket.on('pair_players', function(data) { 
-			// console.log('paired with ', data)
-
-			this.setState({
-				next_turn_ply: data.mode=='m',
-				game_play: true,
-				game_stat: 'Playing with ' + data.opp.name
-			})
-
-		}.bind(this));
-
-
-		this.socket.on('opp_turn', this.turn_opp_live.bind(this));
-
-
-
 	}
 
 //	------------------------	------------------------	------------------------
@@ -233,52 +245,45 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 
 	turn_ply_live (cell_id) {
+        console.log("Sending turn data:", { cell_id: cell_id, symbol: this.state.player_symbol });
+    
+		let { cell_vals, player_symbol } = this.state;
 
-		let { cell_vals } = this.state
+		cell_vals[cell_id] = player_symbol;
 
-		cell_vals[cell_id] = 'x'
+		TweenMax.from(this.refs[cell_id], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut});
 
-		TweenMax.from(this.refs[cell_id], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
+		this.socket.emit('ply_turn', { cell_id: cell_id, symbol: player_symbol });
 
-		this.socket.emit('ply_turn', { cell_id: cell_id });
+		this.setState({
+			cell_vals: cell_vals,
+			next_turn_ply: false // Switch turn to opponent
+		});
 
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: false
-		// })
-
-		// setTimeout(this.turn_comp.bind(this), rand_to_fro(500, 1000));
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
+		this.check_turn();
 	}
 
 //	------------------------	------------------------	------------------------
 
 	turn_opp_live (data) {
+		console.log("turn_opp_live called with data:", data);
+		console.log("Current state before update:", this.state);
+		let { cell_vals } = this.state;
 
-		let { cell_vals } = this.state
-		let empty_cells_arr = []
+		const c = data.cell_id;
+		cell_vals[c] = data.symbol;
+		console.log("Updated cell_vals:", cell_vals);
 
+		TweenMax.from(this.refs[c], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut});
 
-		const c = data.cell_id
-		cell_vals[c] = 'o'
+		this.setState({
+			cell_vals: cell_vals,
+			next_turn_ply: data.your_turn // Switch turn to player
+		});
 
-		TweenMax.from(this.refs[c], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
-
-
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
-
-		this.state.cell_vals = cell_vals
-
-		this.check_turn()
+		this.check_turn();
 	}
 
-//	------------------------	------------------------	------------------------
 //	------------------------	------------------------	------------------------
 //	------------------------	------------------------	------------------------
 
